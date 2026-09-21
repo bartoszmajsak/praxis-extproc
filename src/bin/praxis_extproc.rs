@@ -71,7 +71,6 @@ async fn main() {
 /// Top-level application logic.
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cfg = load_config(&cli.config)?;
-    cfg.server.validate()?;
     let registry = praxis_ai_filters::build_ai_registry();
     let pipeline = config::build_pipeline(&cfg, &registry);
 
@@ -238,7 +237,7 @@ async fn serve_grpc(
     // running after graceful shutdown began to cancel.
     let (force_tx, force_rx) = tokio::sync::watch::channel(false);
     let svc = ExternalProcessorServer::new(PraxisExtProc::new(pipeline).with_force_shutdown(force_rx.clone()));
-    let drain = std::time::Duration::from_secs(server_cfg.shutdown_drain_timeout_secs);
+    let drain = std::time::Duration::from_secs(server_cfg.shutdown_drain_timeout_secs.get());
     let controls = ShutdownControls {
         signal: Box::pin(shutdown_with_deadline(force_tx, drain)),
         force_rx,

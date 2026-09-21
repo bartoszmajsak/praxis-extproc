@@ -76,18 +76,9 @@ pub struct ServerConfig {
     /// Maximum seconds to drain in-flight streams on shutdown before
     /// forcefully cancelling them.
     ///
-    /// Defaults to [`SHUTDOWN_DRAIN_TIMEOUT`] in seconds.
-    #[serde(default = "default_shutdown_drain_timeout_secs")]
-    pub shutdown_drain_timeout_secs: u64,
-}
-
-/// Default graceful-drain deadline; aligns with the common Kubernetes 30s
-/// `terminationGracePeriodSeconds`.
-pub const SHUTDOWN_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Serde default for [`ServerConfig::shutdown_drain_timeout_secs`].
-const fn default_shutdown_drain_timeout_secs() -> u64 {
-    SHUTDOWN_DRAIN_TIMEOUT.as_secs()
+    /// Defaults to [`DrainTimeoutSecs::default`]; must be greater than zero.
+    #[serde(default)]
+    pub shutdown_drain_timeout_secs: DrainTimeoutSecs,
 }
 
 impl Default for ServerConfig {
@@ -97,24 +88,46 @@ impl Default for ServerConfig {
             health_address: "0.0.0.0:50052".to_owned(),
             metrics_address: "0.0.0.0:9090".to_owned(),
             tls: crate::tls::TlsConfig::default(),
-            shutdown_drain_timeout_secs: SHUTDOWN_DRAIN_TIMEOUT.as_secs(),
+            shutdown_drain_timeout_secs: DrainTimeoutSecs::default(),
         }
     }
 }
 
-impl ServerConfig {
-    /// Validate server settings.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the drain timeout is zero.
-    pub fn validate(&self) -> Result<()> {
-        if self.shutdown_drain_timeout_secs == 0 {
-            return Err(ExtProcError::Config(
-                "server.shutdown_drain_timeout_secs must be greater than zero".to_owned(),
-            ));
-        }
-        Ok(())
+/// Graceful-drain deadline in seconds, guaranteed non-zero at parse time.
+///
+/// Constrained numeric parsed via `#[serde(try_from = "u64")]`, so an invalid
+/// (zero) value is rejected during deserialization rather than at a later
+/// validation step.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(try_from = "u64")]
+pub struct DrainTimeoutSecs(std::num::NonZeroU64);
+
+impl DrainTimeoutSecs {
+    /// The configured drain deadline, in seconds.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl Default for DrainTimeoutSecs {
+    /// 30s, aligning with the common Kubernetes `terminationGracePeriodSeconds`.
+    fn default() -> Self {
+        // 30 is non-zero, so the fallback arm is never taken.
+        Self(match std::num::NonZeroU64::new(30) {
+            Some(v) => v,
+            None => std::num::NonZeroU64::MIN,
+        })
+    }
+}
+
+impl TryFrom<u64> for DrainTimeoutSecs {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
+        std::num::NonZeroU64::new(value)
+            .map(Self)
+            .ok_or("shutdown_drain_timeout_secs must be greater than zero")
     }
 }
 
@@ -237,7 +250,8 @@ server:
         let cfg: ExtProcConfig = serde_yaml::from_str("{}").unwrap();
 
         assert_eq!(
-            cfg.server.shutdown_drain_timeout_secs, 30,
+            cfg.server.shutdown_drain_timeout_secs.get(),
+            30,
             "drain timeout should default to 30s"
         );
     }
@@ -252,21 +266,23 @@ server:
         )
         .unwrap();
 
-        assert_eq!(cfg.server.shutdown_drain_timeout_secs, 5, "drain timeout should match");
-        cfg.server.validate().expect("non-zero drain timeout is valid");
+        assert_eq!(
+            cfg.server.shutdown_drain_timeout_secs.get(),
+            5,
+            "drain timeout should match"
+        );
     }
 
     #[test]
     fn zero_shutdown_drain_timeout_rejected() {
-        let cfg: ExtProcConfig = serde_yaml::from_str(
+        let result: std::result::Result<ExtProcConfig, _> = serde_yaml::from_str(
             r#"
 server:
   shutdown_drain_timeout_secs: 0
 "#,
-        )
-        .unwrap();
+        );
 
-        let err = cfg.server.validate().expect_err("zero drain timeout should fail");
+        let err = result.expect_err("zero drain timeout should be rejected at parse time");
         assert!(
             err.to_string().contains("shutdown_drain_timeout_secs"),
             "error should name the field: {err}"
