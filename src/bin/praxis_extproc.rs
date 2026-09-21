@@ -122,12 +122,9 @@ async fn start_services(
     server_cfg: &config::ServerConfig,
     fips_active: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    Box::pin(run_with_sidecars(
-        addrs,
-        true,
-        fips_active,
-        serve_grpc(addrs.0, pipeline, server_cfg),
-    ))
+    Box::pin(run_with_sidecars(addrs, true, fips_active, move |drain_rx| {
+        serve_grpc(addrs.0, pipeline, server_cfg, drain_rx)
+    }))
     .await
 }
 
@@ -138,8 +135,8 @@ async fn serve_unready(
     addrs: (std::net::SocketAddr, std::net::SocketAddr, std::net::SocketAddr),
     fips_active: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    Box::pin(run_with_sidecars(addrs, false, fips_active, async {
-        shutdown_signal().await;
+    Box::pin(run_with_sidecars(addrs, false, fips_active, |drain_rx| async move {
+        wait_drain(drain_rx).await;
         Ok(())
     }))
     .await
@@ -158,27 +155,38 @@ enum Selected {
 
 /// Run the health and metrics sidecars alongside a foreground future.
 ///
-/// Health is registered as serving per `serving`. All three futures are
-/// supervised together: whichever completes first triggers shutdown of the
-/// remaining tasks, and its result (including a sidecar's bind failure) is
-/// returned as the originating error.
-async fn run_with_sidecars(
+/// A single shutdown-signal listener drives a shared drain latch: `foreground`
+/// receives its [`watch::Receiver`] to start its own drain, and the health
+/// sidecar uses it to flip readiness to `NotServing` the moment the signal
+/// fires. All three futures are supervised together: whichever completes first
+/// triggers shutdown of the remaining tasks, and its result (including a
+/// sidecar's bind failure) is returned as the originating error.
+///
+/// [`watch::Receiver`]: tokio::sync::watch::Receiver
+async fn run_with_sidecars<F, Fut>(
     addrs: (std::net::SocketAddr, std::net::SocketAddr, std::net::SocketAddr),
     serving: bool,
     fips_active: bool,
-    foreground: impl Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    foreground: F,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    F: FnOnce(tokio::sync::watch::Receiver<bool>) -> Fut,
+    Fut: Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send,
+{
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+    let drain_rx = spawn_drain_signal();
 
     let health_rx = shutdown_tx.subscribe();
+    let health_drain = wait_drain(drain_rx.clone());
     let mut health = tokio::spawn(async move {
-        praxis_extproc::health::serve(addrs.1, serving, fips_active, wait_broadcast(health_rx)).await
+        praxis_extproc::health::serve(addrs.1, serving, fips_active, health_drain, wait_broadcast(health_rx)).await
     });
 
     let metrics_rx = shutdown_tx.subscribe();
     let mut metrics =
         tokio::spawn(async move { praxis_extproc::metrics::serve(addrs.2, wait_broadcast(metrics_rx)).await });
 
+    let foreground = foreground(drain_rx);
     tokio::pin!(foreground);
 
     let (outcome, selected) = tokio::select! {
@@ -232,6 +240,7 @@ async fn serve_grpc(
     addr: std::net::SocketAddr,
     pipeline: std::sync::Arc<praxis_filter::FilterPipeline>,
     server_cfg: &config::ServerConfig,
+    drain_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // The latch fires when the drain deadline expires, forcing any streams still
     // running after graceful shutdown began to cancel.
@@ -239,7 +248,7 @@ async fn serve_grpc(
     let svc = ExternalProcessorServer::new(PraxisExtProc::new(pipeline).with_force_shutdown(force_rx.clone()));
     let drain = std::time::Duration::from_secs(server_cfg.shutdown_drain_timeout_secs.get());
     let controls = ShutdownControls {
-        signal: Box::pin(shutdown_with_deadline(force_tx, drain)),
+        signal: Box::pin(shutdown_with_deadline(drain_rx, force_tx, drain)),
         force_rx,
     };
 
@@ -319,12 +328,16 @@ async fn serve_bounded(
 // Shutdown
 // -----------------------------------------------------------------------------
 
-/// Wait for the shutdown signal, then arm the drain deadline.
+/// Wait for the shared drain signal, then arm the drain deadline.
 ///
 /// Returning starts tonic's graceful drain; a detached timer force-cancels any
 /// streams still running once `drain` elapses by flipping the shared latch.
-async fn shutdown_with_deadline(force_tx: tokio::sync::watch::Sender<bool>, drain: std::time::Duration) {
-    shutdown_signal().await;
+async fn shutdown_with_deadline(
+    drain_rx: tokio::sync::watch::Receiver<bool>,
+    force_tx: tokio::sync::watch::Sender<bool>,
+    drain: std::time::Duration,
+) {
+    wait_drain(drain_rx).await;
     tokio::spawn(async move {
         tokio::time::sleep(drain).await;
         warn!(
@@ -335,6 +348,27 @@ async fn shutdown_with_deadline(force_tx: tokio::sync::watch::Sender<bool>, drai
             info!("drain deadline expired but no streams remained to cancel");
         }
     });
+}
+
+/// Spawn the single SIGTERM/SIGINT listener, returning a latch that flips to
+/// `true` when graceful shutdown should begin.
+///
+/// Both the gRPC serving path and the health sidecar observe this one receiver,
+/// so shutdown has a single signal source and a single log line.
+fn spawn_drain_signal() -> tokio::sync::watch::Receiver<bool> {
+    let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        if drain_tx.send(true).is_err() {
+            info!("shutdown signal fired but no drain receivers remained");
+        }
+    });
+    drain_rx
+}
+
+/// Wait until the shared drain latch flips to `true`.
+async fn wait_drain(mut drain_rx: tokio::sync::watch::Receiver<bool>) {
+    drop(drain_rx.wait_for(|started| *started).await);
 }
 
 /// Wait for SIGTERM or SIGINT for graceful shutdown.

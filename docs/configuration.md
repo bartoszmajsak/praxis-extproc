@@ -168,14 +168,17 @@ server:
 
 ### Graceful shutdown
 
-On `SIGTERM`/`SIGINT` the server stops accepting new
-connections and drains in-flight streams. If any are
-still running after `shutdown_drain_timeout_secs`,
-they are forcefully cancelled with `UNAVAILABLE` so
-the process can exit promptly. The default of 30s
-aligns with the common Kubernetes
-`terminationGracePeriodSeconds`. Must be greater
-than zero.
+On `SIGTERM`/`SIGINT` the health server immediately
+flips the `ExternalProcessor` readiness status to
+`NotServing` (staying up to report it) so Kubernetes
+and Envoy stop routing before the drain, while the
+gRPC server stops accepting new connections and drains
+in-flight streams. If any are still running after
+`shutdown_drain_timeout_secs`, they are forcefully
+cancelled with `UNAVAILABLE` so the process can exit
+promptly. The default of 30s aligns with the common
+Kubernetes `terminationGracePeriodSeconds`. Must be
+greater than zero.
 
 ### TLS
 
