@@ -111,10 +111,12 @@ impl DrainTimeoutSecs {
 }
 
 impl Default for DrainTimeoutSecs {
-    /// 30s, aligning with the common Kubernetes `terminationGracePeriodSeconds`.
+    /// 20s, chosen to fit inside the common 30s Kubernetes
+    /// `terminationGracePeriodSeconds` with headroom for a preStop lameduck
+    /// and final cleanup before SIGKILL.
     fn default() -> Self {
-        // 30 is non-zero, so the fallback arm is never taken.
-        Self(match std::num::NonZeroU64::new(30) {
+        // 20 is non-zero, so the fallback arm is never taken.
+        Self(match std::num::NonZeroU64::new(20) {
             Some(v) => v,
             None => std::num::NonZeroU64::MIN,
         })
@@ -251,8 +253,8 @@ server:
 
         assert_eq!(
             cfg.server.shutdown_drain_timeout_secs.get(),
-            30,
-            "drain timeout should default to 30s"
+            20,
+            "drain timeout should default to 20s"
         );
     }
 

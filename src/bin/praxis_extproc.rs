@@ -261,6 +261,12 @@ async fn serve_grpc(
 /// Shutdown wiring shared by the plaintext and TLS serving paths.
 struct ShutdownControls {
     /// Resolves when graceful shutdown should begin, starting tonic's drain.
+    ///
+    /// tonic's `serve_with_shutdown` closes the listener immediately here — it
+    /// has no in-process lameduck that keeps accepting new connections during a
+    /// grace window (see grpc-rust#1940). Deployments therefore rely on a k8s
+    /// preStop lameduck to stop routing before SIGTERM; see `deploy/` and the
+    /// "Kubernetes deployment" section of `docs/configuration.md`.
     signal: std::pin::Pin<Box<dyn Future<Output = ()> + Send>>,
     /// Force-close latch; flips when the drain deadline expires.
     force_rx: tokio::sync::watch::Receiver<bool>,
