@@ -49,7 +49,12 @@ const GUARDS: &[Guard] = &[
     },
     Guard {
         label: "vendored OpenSSL",
-        pattern: r"^[^#]*\bvendored\b",
+        // The `vendored` features of openssl, native-tls and reqwest
+        // (`native-tls-vendored`), and git2's `vendored-openssl`. A word
+        // boundary alone would also catch prost-wkt-types' `vendored-protox`,
+        // a protobuf compiler, so a hyphenated continuation other than
+        // `-openssl` does not count.
+        pattern: r"^[^#]*\bvendored(-openssl)?([^-\w]|$)",
         why: "a vendored libcrypto is compiled into the binary and is not the validated module",
         fix: "drop the feature; build with OPENSSL_NO_VENDOR=1",
         paths: &["Cargo.toml", "proto/Cargo.toml", "src"],
@@ -169,6 +174,18 @@ mod tests {
         assert!(
             vendored.is_match(r#"openssl = { version = "0.10", features = ["vendored"] }"#),
             "a vendored feature"
+        );
+        assert!(
+            vendored.is_match(r#"reqwest = { version = "0.12", features = ["native-tls-vendored"] }"#),
+            "reqwest's vendored native-tls"
+        );
+        assert!(
+            vendored.is_match(r#"git2 = { version = "0.20", features = ["vendored-openssl"] }"#),
+            "git2's vendored OpenSSL"
+        );
+        assert!(
+            !vendored.is_match(r#"prost-wkt-types = { version = "0.7", features = ["vendored-protox"] }"#),
+            "a vendored protobuf compiler is not OpenSSL"
         );
         assert!(
             !vendored.is_match("openssl = \"0.10\" # never vendored"),
