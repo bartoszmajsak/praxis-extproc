@@ -105,7 +105,8 @@ filters and everything Praxis AI offers for the OpenAI
 Responses API (the response store with its Postgres and
 SQLite backends, Conversations, context compaction, MCP
 tools, the file resolver), as it did before those
-features existed.
+features existed. The FIPS build, which is the image,
+carries only the Responses filters; see [FIPS](fips.md).
 
 [Praxis AI]: https://github.com/praxis-proxy/ai
 [Praxis filter documentation]: https://github.com/praxis-proxy/praxis/blob/main/docs/filters.md
