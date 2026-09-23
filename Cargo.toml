@@ -77,6 +77,9 @@ tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
 
+[lints]
+workspace = true
+
 [dev-dependencies]
 metrics-util = { version = "0.19", default-features = false, features = ["debugging"] }
 rcgen = "0.13.2"
@@ -85,7 +88,13 @@ serde_json = "1.0.151"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "test-util"] }
 tower = { version = "0.5.3", features = ["util"] }
 
-[lints.rust]
+# The server package is the workspace root; proto carries the generated
+# protobuf code and xtask the development tasks (`cargo xtask fips`).
+[workspace]
+members = ["proto", "xtask"]
+resolver = "3"
+
+[workspace.lints.rust]
 dead_code = "deny"
 unsafe_code = "deny"
 missing_docs = "deny"
@@ -109,7 +118,7 @@ noop_method_call = "deny"
 redundant_lifetimes = "deny"
 missing_debug_implementations = "allow"
 
-[lints.clippy]
+[workspace.lints.clippy]
 # Async and concurrency safety
 await_holding_lock = "deny"
 await_holding_refcell_ref = "deny"
@@ -291,7 +300,7 @@ semicolon_inside_block = "deny"
 # Restriction: enforce clippy.toml method blocklist
 disallowed_methods = "deny"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
 invalid_codeblock_attributes = "deny"
