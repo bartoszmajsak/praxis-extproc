@@ -3332,8 +3332,10 @@ dependencies = [
  "praxis-proxy-filter",
  "praxis-proxy-proto",
  "prost",
+ "quixotic-plecostomus-rustls-openssl",
  "rcgen",
  "reqwest 0.12.28",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3942,7 +3944,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4060,6 +4062,20 @@ dependencies = [
  "rustls-pemfile",
  "rustls-pki-types",
  "tokio-rustls",
+]
+
+[[package]]
+name = "quixotic-plecostomus-rustls-openssl"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6a3a34cedce4e2fa3139daae891222fde83957801bf0de8ecc8c09ffaf8796"
+dependencies = [
+ "foreign-types",
+ "once_cell",
+ "openssl",
+ "openssl-sys",
+ "rustls",
+ "zeroize",
 ]
 
 [[package]]
@@ -4580,7 +4596,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
