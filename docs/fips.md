@@ -38,6 +38,7 @@ know which features to pick:
 | `responses-store`: the response store the Responses filters keep state in | yes | no: built on sqlx, whose migration checksums use `sha2` |
 | `responses-full`: the rest of what Praxis AI offers on that store (the Postgres and SQLite backends, Conversations, context compaction, MCP tools, the file resolver) | yes | no: all of it needs the store |
 | `aws-sigv4`: the `aws_sigv4_sign` filter | yes | no: signs with `sha2` and `hmac` |
+| `policy-engine`: the praxis `policy` filter (the Praxis Policy Engine) | yes | no: its runtime and plugins carry `aws-lc-rs`, `sha2` and `hmac` |
 
 `FIPS_FEATURES` is defined once, in the Makefile; the `Containerfile`'s
 `CARGO_FEATURES` default mirrors it.
@@ -73,6 +74,17 @@ signature with `sha2` and `hmac`, both on the denylist. No shipped
 configuration uses the filter. Fixing it means signing through OpenSSL's EVP
 APIs (`openssl::hash`, `openssl::sign`) in praxis-ai instead of the
 `aws-sigv4` crate.
+
+**The praxis `policy` filter** (`policy-engine`). The Praxis Policy Engine,
+which praxis-filter builds from the praxis-policy crates
+([praxis-proxy/policy]). Its runtime hashes with `sha2`, its JWT plugin
+verifies with `jsonwebtoken` (which compiles in `aws-lc-rs`), and its OAuth
+and Valkey plugins use `sha2` and `hmac`. No shipped configuration uses the
+filter; a configuration naming it is rejected at startup by the image.
+Fixing it means the engine doing its cryptography through OpenSSL in
+praxis-policy.
+
+[praxis-proxy/policy]: https://github.com/praxis-proxy/policy
 
 All of these are still on for a default `cargo build`, so a developer's
 local build is what it was.
@@ -196,7 +208,7 @@ Every crypto-adjacent component in the image, and why it is compliant:
 | aws-sigv4 (`aws_sigv4_sign`) | request signing with sha2 and hmac | not in the FIPS build (feature `aws-sigv4`) |
 | sqlx-core (the Responses store) | migration checksums use sha2 | not in the FIPS build (feature `responses-store`) |
 | sqlx-postgres, rmcp, tiktoken-rs (everything on the store) | SCRAM authentication with md-5, hmac, sha2 and hkdf; reqwest with aws-lc-rs behind the MCP client; the tokenizer | not in the FIPS build (feature `responses-full`) |
-| the praxis policy engine | JWT, OAuth, Valkey builtins carry aws-lc, sha2 and hmac | not built in: praxis-filter is taken without its default features |
+| the praxis policy engine (praxis-policy) | its runtime and JWT, OAuth, Valkey builtins carry aws-lc, sha2 and hmac | not in the FIPS build (feature `policy-engine`) |
 | rcgen, reqwest with native-tls | test fixtures and clients | development only, absent from the shipped binary and its manifest |
 
 The report and Red Hat's scanner both confirm the last row on every build:
@@ -205,14 +217,16 @@ defines no symbol of a bundled crypto backend.
 
 ## Status of the dependency pins
 
-The crypto picture above is the one the tooling was written against and
-verified with the praxis FIPS branch ([praxis-proxy/praxis#1254]) and the
-praxis-ai revision that follows it. The committed pins are one step behind:
-praxis-ai at its current `main` still targets the 0.9 Pingora fork (whose
-rustls crate carries a ring provider) and enables praxis-filter's policy
-engine, so `make fips-deps`, `make fips-check` and the FIPS workflow report
-those crates until praxis-ai's FIPS revision is published and pinned here,
-together with a temporary `[patch.crates-io]` for the praxis crates. That
-bump is a dependency change only; nothing else in this tree waits on it.
+The crypto picture above depends on the praxis FIPS work
+([praxis-proxy/praxis#1254]), which no praxis release carries yet. praxis-ai
+is pinned at a `main` that includes its own FIPS work and takes the praxis
+crates through a temporary `[patch.crates-io]` at a commit from that pull
+request. Patches do not carry over to dependents, so `Cargo.toml` repeats
+the same `[patch.crates-io]` (and `deny.toml` allows the praxis git source).
+Ours is the one that applies, to praxis-ai as well, so keep it on
+praxis-ai's revision: praxis-ai is only built and tested against that one.
+Without it, praxis 0.6.0 from crates.io brings back the 0.9 Pingora fork,
+whose rustls crate carries a ring provider, and `make fips-deps` fails. Once
+a praxis release carries the work, drop the patch and bump the versions.
 
 [praxis-proxy/praxis#1254]: https://github.com/praxis-proxy/praxis/pull/1254

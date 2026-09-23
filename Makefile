@@ -125,6 +125,8 @@ images: container-release
 # features to pick:
 #
 #   aws-sigv4         aws_sigv4_sign signs with sha2 and hmac
+#   policy-engine     the praxis policy filter's JWT, OAuth and Valkey
+#                     plugins carry aws-lc-rs, sha2 and hmac
 #   responses-store   the Responses store is built on sqlx, whose migration
 #                     checksums use sha2
 #

@@ -16,8 +16,8 @@
 #
 # The FIPS build differs from a default `cargo build` only in its cargo
 # features: it leaves out what carries pure-Rust cryptography (the aws-sigv4
-# filter, the Responses store). CARGO_FEATURES defaults to the Makefile's
-# FIPS_FEATURES; keep the two in sync.
+# filter, the praxis policy engine, the Responses store). CARGO_FEATURES
+# defaults to the Makefile's FIPS_FEATURES; keep the two in sync.
 #
 # Both base images are pinned by digest and their Red Hat signatures are
 # verified by `make fips-verify-image` before any podman build here. Update

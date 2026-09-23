@@ -40,20 +40,22 @@ pub(crate) const DENIED: &[&str] = &[
 fn hint_location(crate_name: &str) -> &'static str {
     match crate_name {
         "ring" => {
-            "the Pingora fork before 0.10.0 (its rustls crate carried a ring provider; praxis-ai before it followed \
-             the praxis FIPS branch still targets it); a dependency enabling rustls' 'ring' feature; rcgen outside \
-             dev-dependencies; a manifest built from 'cargo metadata' (which activates rustls-webpki's weak \
-             'ring?/alloc' feature) when the graph itself is clean"
+            "the Pingora fork before 0.10.0 (its rustls crate carried a ring provider), which praxis 0.6.0 from \
+             crates.io brings back when Cargo.toml's [patch.crates-io] is removed or no longer applies; a \
+             dependency enabling rustls' 'ring' feature; rcgen outside dev-dependencies; a manifest built from \
+             'cargo metadata' (which activates rustls-webpki's weak 'ring?/alloc' feature) when the graph itself \
+             is clean"
         },
         "aws-lc-rs" | "aws-lc-sys" => {
             "a dependency enabling rustls' 'aws_lc_rs' feature (rustls' default, kept off in Cargo.toml); \
-             jsonwebtoken via the praxis policy engine, which praxis-ai enabled by default before its FIPS work"
+             jsonwebtoken via the praxis policy engine (feature policy-engine; praxis-ai enabled it by default \
+             before its FIPS work)"
         },
         "sha2" => {
             "aws-sigv4 (feature aws-sigv4); sqlx-core's migration checksums (feature responses-store); praxis-ai \
-             before its FIPS work; the praxis policy engine"
+             before its FIPS work; the praxis policy engine (feature policy-engine)"
         },
-        "hmac" => "aws-sigv4 (feature aws-sigv4); the praxis policy engine's 'oauth' builtin",
+        "hmac" => "aws-sigv4 (feature aws-sigv4); the praxis policy engine's 'oauth' builtin (feature policy-engine)",
         "sha1" => "tokio-tungstenite WebSocket accept key (test utilities)",
         "openssl-src" => "the 'vendored' feature of the openssl crate, or OPENSSL_STATIC",
         "boring" | "boring-sys" => "pingora 'boringssl' feature",
@@ -69,12 +71,13 @@ fn hint_fix(crate_name: &str) -> &'static str {
              features; the only provider is the OpenSSL one src/fips.rs installs"
         },
         "aws-lc-rs" | "aws-lc-sys" => {
-            "find the edge with 'cargo tree -e features -i aws-lc-rs'; keep rustls default-features off; take \
-             praxis-filter without its default features (the policy engine)"
+            "find the edge with 'cargo tree -e features -i aws-lc-rs'; keep rustls default-features off; leave \
+             policy-engine out of the FIPS build (FIPS_FEATURES in the Makefile)"
         },
         "sha2" | "hmac" => {
-            "leave aws-sigv4 and responses-store out of the FIPS build (FIPS_FEATURES in the Makefile), or route the \
-             operation through openssl (EVP APIs: openssl::hash, openssl::sign, openssl::pkey)"
+            "leave aws-sigv4, policy-engine and responses-store out of the FIPS build (FIPS_FEATURES in the \
+             Makefile), or route the operation through openssl (EVP APIs: openssl::hash, openssl::sign, \
+             openssl::pkey)"
         },
         "sha1" => "keep it a dev-dependency; it must not appear in the release graph",
         "openssl-src" => "remove 'vendored', build with OPENSSL_NO_VENDOR=1, never set OPENSSL_STATIC",
