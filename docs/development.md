@@ -281,7 +281,9 @@ build, and `fips-report` runs the report against
    `OPENSSL_`), imports OpenSSL, carries the
    cargo-auditable manifest (`.dep-v0`, built from
    cargo's SBOM precursor, listing no denied crate) and
-   the rustc producer string.
+   the rustc producer string. A binary that is missing,
+   unreadable or not an ELF file is a finding, not a
+   skipped check.
 3. **Source guards**: the application never enables a
    FIPS provider itself, never uses OpenSSL's legacy
    (non-provider) digest API, never vendors or

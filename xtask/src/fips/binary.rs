@@ -4,7 +4,8 @@
 //! Binary section of the report: the shipped binary must link the system
 //! libcrypto dynamically, define no symbol of a bundled crypto backend, import
 //! OpenSSL, and carry the cargo-auditable manifest and the rustc producer
-//! string.
+//! string. A binary that is not given, cannot be read or is not an ELF file is
+//! a finding too, so the report never passes a build it did not inspect.
 
 use std::{collections::BTreeMap, io::Read as _, path::Path, process::Command};
 
@@ -25,28 +26,88 @@ const OPENSSL_PREFIXES: &[&str] = &["EVP_", "SSL_", "OSSL_", "RAND_"];
 /// Append the binary section.
 pub(crate) fn section(report: &mut Report, binary: Option<&Path>) {
     report.section("Binary");
-    let Some(binary) = binary else {
-        report.warn("no binary given; build one (make release-fips) and pass its path");
-        return;
-    };
-    if !binary.is_file() {
-        report.warn(&format!("binary not found at {}; skipped", binary.display()));
-        return;
+    if let Err(finding) = assess(report, binary) {
+        report.fail(finding);
     }
+}
+
+/// Run the binary checks, or return the finding that stops them before they
+/// start: no binary, one that cannot be read, or one that is not an ELF file.
+fn assess(report: &mut Report, binary: Option<&Path>) -> Result<(), Finding> {
+    let binary = binary.ok_or_else(no_binary)?;
+    let data = read_binary(binary)?;
+    let file = parse_elf(&data).map_err(|reason| not_elf(binary, &reason))?;
     report.info(&format!("path: {}", binary.display()));
     linkage(report, binary);
-    let Ok(data) = std::fs::read(binary) else {
-        report.warn("could not read the binary; ELF checks skipped");
-        return;
-    };
-    let Ok(file) = object::File::parse(&*data) else {
-        report.warn("not an ELF file; ELF checks skipped");
-        return;
-    };
     defined_symbols(report, &file);
     imports(report, &file);
     manifest(report, &file, binary);
     producer(report, &file);
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// The Binary Itself
+// -----------------------------------------------------------------------------
+
+/// Why a binary the checks cannot open is a finding rather than a warning.
+const UNASSESSED: &str = "the linkage, symbol, manifest and producer checks all run on the binary itself; without \
+                          them the report would call a build FIPS-ready without ever inspecting it";
+
+/// Read the binary, refusing anything but a regular file first: reading a FIFO
+/// blocks until something writes to it, and a device like /dev/zero never
+/// ends.
+fn read_binary(binary: &Path) -> Result<Vec<u8>, Finding> {
+    let metadata = std::fs::metadata(binary).map_err(|err| unreadable_binary(binary, &err.to_string()))?;
+    if !metadata.is_file() {
+        return Err(unreadable_binary(binary, "not a regular file"));
+    }
+    std::fs::read(binary).map_err(|err| unreadable_binary(binary, &err.to_string()))
+}
+
+/// Parse `data` as an ELF file, the only format the checks (and a Linux
+/// image) deal in.
+fn parse_elf(data: &[u8]) -> Result<object::File<'_>, String> {
+    let file = object::File::parse(data).map_err(|err| err.to_string())?;
+    match file.format() {
+        object::BinaryFormat::Elf => Ok(file),
+        format => Err(format!("{format:?} format")),
+    }
+}
+
+/// The finding for a report run without a binary and without --deps-only.
+fn no_binary() -> Finding {
+    Finding {
+        title: "no binary given, so the binary checks did not run".to_owned(),
+        why: UNASSESSED.to_owned(),
+        location: "the command line: the binary to assess is the BINARY argument".to_owned(),
+        fix: "build it with 'make release-fips' and pass its path (as 'make fips-report' does), or pass --deps-only \
+              to report on the dependency graph alone"
+            .to_owned(),
+    }
+}
+
+/// The finding for a binary path that cannot be read (missing, not a regular
+/// file, no permission).
+fn unreadable_binary(binary: &Path, reason: &str) -> Finding {
+    Finding {
+        title: format!("cannot read the binary at {} ({reason})", binary.display()),
+        why: UNASSESSED.to_owned(),
+        location: "the BINARY argument (FIPS_BIN for 'make fips-report')".to_owned(),
+        fix: "build it with 'make release-fips', or pass the path of an existing, readable binary".to_owned(),
+    }
+}
+
+/// The finding for a file that is not an ELF binary.
+fn not_elf(binary: &Path, reason: &str) -> Finding {
+    Finding {
+        title: format!("{} is not an ELF file ({reason})", binary.display()),
+        why: UNASSESSED.to_owned(),
+        location: "the BINARY argument (FIPS_BIN for 'make fips-report')".to_owned(),
+        fix: "pass the praxis-extproc executable itself ('make release-fips' writes \
+              target/fips/release/praxis-extproc), not a script, archive or other file"
+            .to_owned(),
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -334,7 +395,7 @@ fn producer(report: &mut Report, file: &object::File<'_>) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
+    use std::{io::Write as _, path::PathBuf};
 
     use super::*;
 
@@ -377,6 +438,37 @@ mod tests {
         );
     }
 
+    /// The binary section's report for `binary`, on its own.
+    fn binary_report(binary: Option<&Path>) -> Report {
+        let mut report = Report::default();
+        section(&mut report, binary);
+        report
+    }
+
+    #[test]
+    fn a_binary_the_checks_cannot_open_fails_the_report() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let script = dir.path().join("praxis-extproc");
+        std::fs::write(&script, "#!/bin/sh\n").expect("a temporary file");
+        let cases = [
+            (None, "no binary given"),
+            (Some(dir.path().join("missing")), "cannot read the binary"),
+            (Some(dir.path().to_owned()), "not a regular file"),
+            // A device is refused before it is read; /dev/null keeps this
+            // test from hanging if that guard ever goes.
+            (Some(PathBuf::from("/dev/null")), "not a regular file"),
+            (Some(script), "is not an ELF file"),
+        ];
+        for (binary, title) in cases {
+            let report = binary_report(binary.as_deref());
+            assert!(report.has_finding(title), "{binary:?} is a finding: {title}");
+            assert!(
+                !report.has_finding("libcrypto"),
+                "{binary:?} never reaches ldd, so there is no linkage finding about it"
+            );
+        }
+    }
+
     #[test]
     fn a_corrupt_manifest_is_an_error() {
         assert!(parse_manifest(b"not zlib").is_err(), "garbage is not zlib");
@@ -390,7 +482,7 @@ mod tests {
     fn the_test_binary_itself_is_a_rust_elf_and_the_symbol_scan_sees_what_it_links() {
         let me = std::env::current_exe().expect("the test binary has a path");
         let data = std::fs::read(&me).expect("the test binary is readable");
-        let file = object::File::parse(&*data).expect("the test binary is an ELF file");
+        let file = parse_elf(&data).expect("the test binary is an ELF file");
         let hits = backend_symbols(&file);
         assert!(
             hits.is_empty(),
