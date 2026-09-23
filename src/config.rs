@@ -226,7 +226,7 @@ pub fn build_pipeline(config: &ExtProcConfig, registry: &FilterRegistry) -> Resu
 
     let mut entries = flatten_chains(&config.filter_chains);
 
-    let mut pipeline = FilterPipeline::build_with_chains(&mut entries, registry, &chains)
+    let mut pipeline = FilterPipeline::build_with_chains(&mut entries, registry, &chains, &config.insecure_options)
         .map_err(|e| ExtProcError::Pipeline(e.to_string()))?;
 
     pipeline

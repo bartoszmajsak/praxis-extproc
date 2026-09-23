@@ -23,12 +23,16 @@ async-trait = "0.1.89"
 bytes = "1.11.1"
 clap = { version = "4.6.1", features = ["derive"] }
 http = "1.4.0"
-# praxis-ai: llmisvc_model_provider_resolver (#699)
-praxis-ai-apis = { git = "https://github.com/praxis-proxy/ai.git", rev = "da29eb4f8858e1130828cf79f400d534ab742382" }
-praxis-ai-filters = { git = "https://github.com/praxis-proxy/ai.git", rev = "da29eb4f8858e1130828cf79f400d534ab742382" }
-# v0.5.4 — version must match praxis-ai's pin to unify PipelineExtension types
-praxis-core = { version = "0.5.4", package = "praxis-proxy-core" }
-praxis-filter = { version = "0.5.4", package = "praxis-proxy-filter" }
+# praxis-ai at its main, where the larger capabilities are opt-in features.
+# `full` plus the SQLite store backend is what its previous default built,
+# so nothing the old pin compiled in is lost.
+praxis-ai-apis = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false }
+praxis-ai-filters = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false, features = ["full", "store-sqlite"] }
+# The praxis version must match praxis-ai's pin so the PipelineExtension
+# types unify. No default features: praxis-filter's default turns on the
+# policy engine, whose plugins carry pure-Rust cryptography.
+praxis-core = { version = "0.6.0", package = "praxis-proxy-core" }
+praxis-filter = { version = "0.6.0", package = "praxis-proxy-filter", default-features = false }
 praxis-proto = { path = "proto", package = "praxis-proxy-proto" }
 hyper = { version = "1.9.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
@@ -290,3 +294,4 @@ inherits = "release"
 debug = 2
 strip = false
 lto = false
+
