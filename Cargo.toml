@@ -14,6 +14,23 @@ name = "praxis-extproc"
 path = "src/bin/praxis_extproc.rs"
 
 [features]
+default = ["aws-sigv4", "responses-full"]
+# The praxis-ai filter groups this server can carry, each mapped onto the
+# praxis-ai feature that provides it. The FIPS build (FIPS_FEATURES in the
+# Makefile, mirrored by the Containerfile's defaults) picks among them.
+# aws_sigv4_sign: AWS Signature V4 request signing. Its signing crates (sha2,
+# hmac) are pure-Rust cryptography, so the FIPS build leaves it out.
+aws-sigv4 = ["praxis-ai-filters/aws-sigv4-filter"]
+# The OpenAI Responses filters.
+responses = ["praxis-ai-filters/openai-responses"]
+# The response store the Responses filters keep state in (previous_response_id
+# chaining), registered as a pipeline extension. It is built on sqlx, whose
+# migration checksums carry sha2, so the FIPS build leaves it out.
+responses-store = ["responses", "praxis-ai-filters/store", "dep:praxis-ai-apis"]
+# Everything else praxis-ai offers for Responses, all of it on the store: the
+# Postgres and SQLite backends, Conversations, context compaction, MCP tools
+# and the file resolver. What the previous praxis-ai pin built in.
+responses-full = ["responses-store", "praxis-ai-filters/openai-all", "praxis-ai-filters/store-all"]
 integration = []
 k8s-e2e = []
 fips = []
@@ -23,11 +40,10 @@ async-trait = "0.1.89"
 bytes = "1.11.1"
 clap = { version = "4.6.1", features = ["derive"] }
 http = "1.4.0"
-# praxis-ai at its main, where the larger capabilities are opt-in features.
-# `full` plus the SQLite store backend is what its previous default built,
-# so nothing the old pin compiled in is lost.
-praxis-ai-apis = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false }
-praxis-ai-filters = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false, features = ["full", "store-sqlite"] }
+# praxis-ai at its main, where the larger capabilities are opt-in features;
+# the [features] above choose which ones this server builds in.
+praxis-ai-apis = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false, optional = true }
+praxis-ai-filters = { git = "https://github.com/praxis-proxy/ai.git", rev = "04acbd49f8a0c2227922234d3ba40a1d44342cea", default-features = false }
 # The praxis version must match praxis-ai's pin so the PipelineExtension
 # types unify. No default features: praxis-filter's default turns on the
 # policy engine, whose plugins carry pure-Rust cryptography.
@@ -50,7 +66,9 @@ tokio-openssl = "0.6.5"
 tokio-stream = { version = "0.1.17", features = ["net"] }
 tonic = { version = "0.14.6", features = ["transport"] }
 tonic-health = "0.14.6"
-tracing = "0.1.44"
+# `log` was always on through sqlx; explicit so the macro expansions, which
+# clippy counts toward cognitive complexity, are the same in every feature set.
+tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
 
