@@ -738,6 +738,20 @@ mod tests {
         }
     }
 
+    /// A pipeline of just the `state_probe` filter.
+    fn state_probe_pipeline() -> std::sync::Arc<FilterPipeline> {
+        use praxis_filter::FilterRegistry;
+
+        let cfg: crate::config::ExtProcConfig =
+            serde_yaml::from_str("filter_chains:\n  - name: main\n    filters:\n      - filter: state_probe\n")
+                .unwrap();
+        let mut registry = FilterRegistry::with_builtins();
+        registry
+            .register("state_probe", praxis_filter::http_builtin(ProbeFilter::from_config))
+            .unwrap();
+        crate::config::build_pipeline(&cfg, &registry).unwrap()
+    }
+
     /// Removes temporary files created by protocol integration tests even
     /// when an assertion fails before the normal cleanup path runs.
     struct TempFiles(Vec<std::path::PathBuf>);
@@ -754,17 +768,8 @@ mod tests {
     async fn filter_state_survives_request_to_response_phase() {
         use std::sync::atomic::Ordering;
 
-        use praxis_filter::FilterRegistry;
-
         PROBE_OBSERVED.store(0, Ordering::SeqCst);
-        let cfg: crate::config::ExtProcConfig =
-            serde_yaml::from_str("filter_chains:\n  - name: main\n    filters:\n      - filter: state_probe\n")
-                .unwrap();
-        let mut registry = FilterRegistry::with_builtins();
-        registry
-            .register("state_probe", praxis_filter::http_builtin(ProbeFilter::from_config))
-            .unwrap();
-        let pipeline = crate::config::build_pipeline(&cfg, &registry).unwrap();
+        let pipeline = state_probe_pipeline();
         let mut state = StreamState::new();
         state.request = Some(adapter::envoy_headers_to_request(&[]));
 
