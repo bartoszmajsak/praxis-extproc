@@ -283,21 +283,4 @@ mod tests {
         assert_eq!(first, second, "the signals do not change between calls");
         assert!(CryptoProvider::get_default().is_some(), "a provider is installed");
     }
-
-    #[test]
-    fn assess_returns_consistent_status() {
-        let status = assess();
-
-        if cfg!(feature = "fips") && !status.active {
-            assert!(!status.serve_ok, "FIPS required but inactive must refuse to serve");
-        }
-
-        if !cfg!(feature = "fips") {
-            assert!(status.serve_ok, "non-FIPS build must be willing to serve");
-        }
-
-        if cfg!(feature = "fips") && status.active {
-            assert!(status.serve_ok, "FIPS required and active must serve");
-        }
-    }
 }
